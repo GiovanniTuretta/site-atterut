@@ -106,11 +106,10 @@ h1 em,h2 em{font-style:italic;font-weight:500}
 /* Transparente sobre os blocos escuros (logo areia), sólido creme sobre os claros */
 header{
   position:fixed;inset:0 0 auto 0;z-index:60;
-  background:linear-gradient(180deg,rgba(31,39,33,.7),rgba(31,39,33,0));border-bottom:1px solid transparent;
-  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  background:linear-gradient(180deg,rgba(31,39,33,.72),rgba(31,39,33,0));border-bottom:1px solid transparent;
   transition:background .5s,border-color .5s,box-shadow .5s;
 }
-body.header-solido header{background:rgba(245,241,232,.92);border-bottom-color:var(--linha)}
+body.header-solido header{background:rgba(245,241,232,.96);border-bottom-color:var(--linha)}
 body.header-solido.rolou header{box-shadow:0 12px 40px -24px rgba(23,29,25,.45)}
 .header-inner{display:flex;align-items:center;justify-content:space-between;gap:20px;height:var(--header-h)}
 .logo img{height:34px;width:auto}
@@ -161,6 +160,7 @@ html.scrub .hero{height:360svh}
   padding:calc(var(--header-h) + 40px) var(--pad-x) 110px var(--pad-esq);
 }
 .hero-texto{max-width:660px}
+.hero-conteudo,.hero-legenda{will-change:transform,opacity}
 .titulo-hero{color:var(--papel);margin-bottom:26px;text-shadow:0 2px 28px rgba(23,29,25,.4)}
 .titulo-hero em{color:var(--areia)}
 .palavra{display:inline-block;overflow:hidden;vertical-align:bottom;padding-bottom:.08em;margin-bottom:-.08em}
@@ -198,8 +198,7 @@ html.scrub .hero{height:360svh}
 /* Carimbo técnico: legenda do projeto em cena */
 .carimbo-card{
   position:absolute;right:var(--pad-x);bottom:40px;z-index:4;
-  background:rgba(23,29,25,.55);
-  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  background:rgba(23,29,25,.72);
   border:1px solid rgba(201,191,166,.45);border-radius:var(--raio-chip);
   padding:14px 18px;line-height:1.9;
   font-size:10px;font-weight:600;letter-spacing:.24em;color:var(--areia);
@@ -959,32 +958,55 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
     var ctx = canvas.getContext('2d');
     var movel = matchMedia('(max-width:768px)').matches;
     var pasta = movel ? 'media/seq-m/' : 'media/seq/';
-    var imgs = new Array(QUADROS), atual = -1, alvo = 0, pedido = false; // alvo é fracionário: mistura dois quadros vizinhos
-    var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    var imgs = new Array(QUADROS), mapas = {}, pendentes = {}, atual = -1, alvo = 0, pedido = false; // alvo é fracionário
+    // Backing store no tamanho CSS (dpr 1): menos da metade dos pixels em telas a 150%, sem perda visível sob o véu
+    var dpr = 1;
+    var temBitmap = 'createImageBitmap' in window;
 
     var cobrir = function(im){
+      var iw = im.width || im.naturalWidth, ih = im.height || im.naturalHeight;
       var cw = canvas.width, ch = canvas.height;
-      var s = Math.max(cw / im.naturalWidth, ch / im.naturalHeight);
-      var w = im.naturalWidth * s, h = im.naturalHeight * s;
+      var s = Math.max(cw / iw, ch / ih);
+      var w = iw * s, h = ih * s;
       ctx.drawImage(im, (cw - w) / 2, (ch - h) / 2, w, h);
     };
+    var fonte = function(i){ return mapas[i] || imgs[i]; }; // bitmap já decodificado se houver, senão a imagem
     var maisProximo = function(i){
-      if (imgs[i]) return i;
-      for (var d = 1; d < QUADROS; d++){ if (imgs[i - d]) return i - d; if (imgs[i + d]) return i + d; }
+      if (fonte(i)) return i;
+      for (var d = 1; d < QUADROS; d++){ if (fonte(i - d)) return i - d; if (fonte(i + d)) return i + d; }
       return -1;
+    };
+    // Janela de bitmaps decodificados em volta do quadro atual: decodificação fora da thread principal,
+    // memória limitada (~20 quadros) e nenhum decode síncrono no meio do scroll
+    var ATRAS = 6, FRENTE = 12;
+    var prepararJanela = function(centro){
+      if (!temBitmap) return;
+      for (var i = centro - ATRAS; i <= centro + FRENTE; i++){
+        if (i < 0 || i >= QUADROS || mapas[i] || pendentes[i] || !imgs[i]) continue;
+        pendentes[i] = true;
+        (function(i){
+          createImageBitmap(imgs[i]).then(function(b){ mapas[i] = b; delete pendentes[i]; pedir(); }, function(){ delete pendentes[i]; });
+        })(i);
+      }
+      for (var k in mapas){ if (+k < centro - ATRAS - 4 || +k > centro + FRENTE + 4){ if (mapas[k].close) mapas[k].close(); delete mapas[k]; } }
     };
     // Quadro fracionário: desenha o quadro inferior e funde o seguinte por alpha, para o passeio não andar aos saltos
     var pintar = function(q){
       var i = Math.floor(q), f = q - i;
       var a = maisProximo(i), b = maisProximo(Math.min(i + 1, QUADROS - 1));
       if (a < 0) return;
-      cobrir(imgs[a]);
-      if (b >= 0 && b !== a && f > .02){ ctx.globalAlpha = f; cobrir(imgs[b]); ctx.globalAlpha = 1; }
+      cobrir(fonte(a));
+      if (b >= 0 && b !== a && f > .02){ ctx.globalAlpha = f; cobrir(fonte(b)); ctx.globalAlpha = 1; }
       atual = q;
       if (!canvas.classList.contains('pronto')) canvas.classList.add('pronto');
     };
-    var desenhar = function(){ pedido = false; if (Math.abs(alvo - atual) > .004) pintar(alvo); };
+    var desenhar = function(){
+      pedido = false;
+      prepararJanela(Math.round(alvo));
+      if (Math.abs(alvo - atual) > .004) pintar(alvo);
+    };
     var pedir = function(){ if (!pedido){ pedido = true; requestAnimationFrame(desenhar); } };
+    window.__quadros = function(){ var c = 0; for (var i = 0; i < QUADROS; i++) if (imgs[i]) c++; return c + '/' + QUADROS + ' bmp ' + Object.keys(mapas).length; };
     var dimensionar = function(){
       canvas.width = Math.round(palco.clientWidth * dpr);
       canvas.height = Math.round(palco.clientHeight * dpr);
@@ -1022,7 +1044,7 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
     var tl = gsap.timeline({
       defaults:{ease:'none'},
       scrollTrigger:{
-        trigger:hero, start:'top top', end:'bottom bottom', scrub:1,
+        trigger:hero, start:'top top', end:'bottom bottom', scrub:1.2,
         onUpdate:function(s){
           var p = s.progress;
           if (p > .002 && !estado.rolou){ estado.rolou = true; if (intro) intro.kill(); }
@@ -1172,6 +1194,26 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
       }, {threshold:.4});
       obsCmp.observe(cmp);
     }
+  }
+
+  // ---------- Diagnóstico: abrir com ?fps para ver quadros/s, canvas e quadros carregados ----------
+  if (/[?&]fps/.test(location.search)){
+    var caixa = doc.createElement('div');
+    caixa.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:99;background:rgba(0,0,0,.75);color:#fff;font:12px/1.5 monospace;padding:8px 10px;border-radius:8px;pointer-events:none;white-space:pre';
+    doc.body.appendChild(caixa);
+    var nq = 0, tq = performance.now(), pior = 0, ultimo = tq;
+    var medir = function(t){
+      nq++; var gap = t - ultimo; ultimo = t; if (gap > pior) pior = gap;
+      if (t - tq >= 1000){
+        caixa.textContent = 'fps ' + nq + '  pior ' + Math.round(pior) + 'ms\n' +
+          'canvas ' + (canvas ? canvas.width + 'x' + canvas.height : '-') + '  dpr ' + (devicePixelRatio || 1).toFixed(2) + '\n' +
+          'quadros ' + (window.__quadros ? window.__quadros() : '-') + '\n' +
+          'reduce ' + reduz + '  lenis ' + !!lenis + '  gsap ' + temGsap;
+        nq = 0; pior = 0; tq = t;
+      }
+      requestAnimationFrame(medir);
+    };
+    requestAnimationFrame(medir);
   }
 
   // ---------- Botão magnético do hero ----------
