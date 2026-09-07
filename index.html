@@ -890,7 +890,7 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
   // ---------- Rolagem suave (Lenis) ligada ao ScrollTrigger ----------
   var lenis = null;
   if (animar && window.Lenis){
-    lenis = new Lenis({lerp:.1, smoothWheel:true});
+    lenis = new Lenis({lerp:.08, smoothWheel:true});
     lenis.on('scroll', ScrollTrigger.update);
     gsap.ticker.add(function(t){ lenis.raf(t * 1000); });
     gsap.ticker.lagSmoothing(0);
@@ -959,23 +959,31 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
     var ctx = canvas.getContext('2d');
     var movel = matchMedia('(max-width:768px)').matches;
     var pasta = movel ? 'media/seq-m/' : 'media/seq/';
-    var imgs = new Array(QUADROS), atual = -1, alvo = 0, pedido = false;
+    var imgs = new Array(QUADROS), atual = -1, alvo = 0, pedido = false; // alvo é fracionário: mistura dois quadros vizinhos
     var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
 
-    var pintar = function(i){
-      var im = imgs[i], cw = canvas.width, ch = canvas.height;
+    var cobrir = function(im){
+      var cw = canvas.width, ch = canvas.height;
       var s = Math.max(cw / im.naturalWidth, ch / im.naturalHeight);
       var w = im.naturalWidth * s, h = im.naturalHeight * s;
       ctx.drawImage(im, (cw - w) / 2, (ch - h) / 2, w, h);
-      atual = i;
-      if (!canvas.classList.contains('pronto')) canvas.classList.add('pronto');
     };
     var maisProximo = function(i){
       if (imgs[i]) return i;
       for (var d = 1; d < QUADROS; d++){ if (imgs[i - d]) return i - d; if (imgs[i + d]) return i + d; }
       return -1;
     };
-    var desenhar = function(){ pedido = false; var i = maisProximo(alvo); if (i >= 0 && i !== atual) pintar(i); };
+    // Quadro fracionário: desenha o quadro inferior e funde o seguinte por alpha, para o passeio não andar aos saltos
+    var pintar = function(q){
+      var i = Math.floor(q), f = q - i;
+      var a = maisProximo(i), b = maisProximo(Math.min(i + 1, QUADROS - 1));
+      if (a < 0) return;
+      cobrir(imgs[a]);
+      if (b >= 0 && b !== a && f > .02){ ctx.globalAlpha = f; cobrir(imgs[b]); ctx.globalAlpha = 1; }
+      atual = q;
+      if (!canvas.classList.contains('pronto')) canvas.classList.add('pronto');
+    };
+    var desenhar = function(){ pedido = false; if (Math.abs(alvo - atual) > .004) pintar(alvo); };
     var pedir = function(){ if (!pedido){ pedido = true; requestAnimationFrame(desenhar); } };
     var dimensionar = function(){
       canvas.width = Math.round(palco.clientWidth * dpr);
@@ -1006,7 +1014,7 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
     var estado = {quadro:0, rolou:reduz};
     // Intro automática só sem reduced-motion; no modo reduzido a cena parte do quadro INTRO e só anda com o scroll
     var intro = reduz ? null : gsap.to(estado, {quadro:INTRO, duration:2.4, delay:.5, ease:'power2.out',
-      onUpdate:function(){ if (!estado.rolou){ alvo = Math.round(estado.quadro); pedir(); } }});
+      onUpdate:function(){ if (!estado.rolou){ alvo = estado.quadro; pedir(); } }});
     if (reduz){ alvo = INTRO; pedir(); }
 
     var reguaEl = hero.querySelector('.regua'), cursor = hero.querySelector('.regua-cursor'), pct = hero.querySelector('.regua-pct');
@@ -1014,11 +1022,11 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
     var tl = gsap.timeline({
       defaults:{ease:'none'},
       scrollTrigger:{
-        trigger:hero, start:'top top', end:'bottom bottom', scrub:reduz ? true : .6,
+        trigger:hero, start:'top top', end:'bottom bottom', scrub:1,
         onUpdate:function(s){
           var p = s.progress;
           if (p > .002 && !estado.rolou){ estado.rolou = true; if (intro) intro.kill(); }
-          if (estado.rolou){ alvo = Math.round(INTRO + p * (QUADROS - 1 - INTRO)); pedir(); }
+          if (estado.rolou){ alvo = INTRO + p * (QUADROS - 1 - INTRO); pedir(); }
           pct.textContent = Math.round(p * 100) + '%';
           var faixa = (reguaEl.offsetHeight || 0) - 2;
           cursor.style.transform = 'translate3d(0,' + (p * faixa).toFixed(1) + 'px,0)';
