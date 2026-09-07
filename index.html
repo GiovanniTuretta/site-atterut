@@ -136,7 +136,9 @@ body.header-solido .menu-toggle span{background:var(--verde)}
 
 /* ============================ HERO ============================ */
 /* Percurso pelo projeto 3D: a cena avança conforme o scroll (128 quadros em canvas).
-   Sem JS, sem GSAP, com dados reduzidos ou prefers-reduced-motion: poster estático. */
+   Sem JS, sem GSAP ou com dados reduzidos: poster estático. Com prefers-reduced-motion
+   o percurso continua (só anda quando a pessoa rola); somem intro automática, rolagem
+   suave, parallax e animações de entrada. */
 .hero{position:relative;height:100svh;background:var(--tinta);color:var(--papel)}
 html.scrub .hero{height:360svh}
 .hero-palco{
@@ -534,7 +536,6 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
   html{scroll-behavior:auto}
   .palavra>span{transform:none}
   .canto,.carimbo-card{opacity:1}
-  .hero-canvas,.hero-legenda,.regua,.hero-barra{display:none!important}
   .obra .ficha{opacity:1;transform:none}
   .etapa::before{background:var(--marrom)}
 }
@@ -953,7 +954,7 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
   var palco = hero.querySelector('.hero-palco');
   var canvas = hero.querySelector('.hero-canvas');
   var QUADROS = 128, INTRO = 14; // a intro anda sozinha até o quadro 14; o scroll assume dali em diante
-  if (animar && !salvaDados && canvas && canvas.getContext){
+  if (temGsap && !salvaDados && canvas && canvas.getContext){
     html.classList.add('scrub');
     var ctx = canvas.getContext('2d');
     var movel = matchMedia('(max-width:768px)').matches;
@@ -1002,19 +1003,21 @@ footer{background:var(--tinta-2);color:rgba(201,191,166,.75);padding:64px 0 34px
     dimensionar();
     addEventListener('resize', dimensionar);
 
-    var estado = {quadro:0, rolou:false};
-    var intro = gsap.to(estado, {quadro:INTRO, duration:2.4, delay:.5, ease:'power2.out',
+    var estado = {quadro:0, rolou:reduz};
+    // Intro automática só sem reduced-motion; no modo reduzido a cena parte do quadro INTRO e só anda com o scroll
+    var intro = reduz ? null : gsap.to(estado, {quadro:INTRO, duration:2.4, delay:.5, ease:'power2.out',
       onUpdate:function(){ if (!estado.rolou){ alvo = Math.round(estado.quadro); pedir(); } }});
+    if (reduz){ alvo = INTRO; pedir(); }
 
     var reguaEl = hero.querySelector('.regua'), cursor = hero.querySelector('.regua-cursor'), pct = hero.querySelector('.regua-pct');
     var barraHero = hero.querySelector('.hero-barra');
     var tl = gsap.timeline({
       defaults:{ease:'none'},
       scrollTrigger:{
-        trigger:hero, start:'top top', end:'bottom bottom', scrub:.6,
+        trigger:hero, start:'top top', end:'bottom bottom', scrub:reduz ? true : .6,
         onUpdate:function(s){
           var p = s.progress;
-          if (p > .002 && !estado.rolou){ estado.rolou = true; intro.kill(); }
+          if (p > .002 && !estado.rolou){ estado.rolou = true; if (intro) intro.kill(); }
           if (estado.rolou){ alvo = Math.round(INTRO + p * (QUADROS - 1 - INTRO)); pedir(); }
           pct.textContent = Math.round(p * 100) + '%';
           var faixa = (reguaEl.offsetHeight || 0) - 2;
